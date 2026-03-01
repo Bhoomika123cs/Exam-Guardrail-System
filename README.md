@@ -21,5 +21,5 @@ A real-time exam monitoring system with violation detection and credibility repo
 
 1. Clone the repository
 ```bash
-git clone https://github.com/yourusername/exam-integrity-system.git
+git clone https://github.com/Bhoomika123cs/Exam-Guardrail-System.git
 cd exam-integrity-system
