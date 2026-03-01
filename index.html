@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Exam Interface</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        /* (keep your existing styles – unchanged) */
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:'Segoe UI',sans-serif; background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
+        .exam-container { background:white; border-radius:20px; box-shadow:0 20px 60px rgba(0,0,0,0.3); width:100%; max-width:1000px; overflow:hidden; }
+        .warning-bar { background:#ff4757; color:white; padding:10px; text-align:center; display:none; animation:pulse 1s infinite; }
+        @keyframes pulse { 0%{opacity:1;} 50%{opacity:0.8;} 100%{opacity:1;} }
+        .exam-header { background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:white; padding:20px; display:flex; justify-content:space-between; align-items:center; }
+        .trust-score { background:rgba(255,255,255,0.2); padding:10px 20px; border-radius:30px; font-size:18px; font-weight:bold; }
+        .exam-content { padding:30px; }
+        .join-section { text-align:center; padding:40px; }
+        .join-section h2 { color:#333; margin-bottom:20px; }
+        .input-group { margin-bottom:20px; text-align:left; }
+        .input-group label { display:block; margin-bottom:5px; color:#666; }
+        .input-group input { width:100%; padding:12px; border:2px solid #e0e0e0; border-radius:8px; font-size:16px; }
+        .btn { background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:white; border:none; padding:12px 30px; border-radius:8px; font-size:16px; cursor:pointer; font-weight:600; margin:5px; }
+        .btn:hover { transform:translateY(-2px); box-shadow:0 5px 15px rgba(102,126,234,0.4); }
+        .btn:disabled { opacity:0.6; cursor:not-allowed; }
+        .question-section { display:none; }
+        .quiz-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; padding:15px; background:#f8f9fa; border-radius:10px; }
+        .question-counter { font-size:18px; font-weight:bold; color:#667eea; }
+        .timer { font-size:20px; font-weight:bold; color:#ff4757; background:#fff3cd; padding:8px 15px; border-radius:30px; }
+        .question { background:#f8f9fa; padding:25px; border-radius:10px; margin-bottom:20px; border-left:4px solid #667eea; }
+        .options { display:grid; gap:12px; }
+        .option { background:white; padding:15px 20px; border:2px solid #e0e0e0; border-radius:8px; cursor:pointer; transition:all 0.3s; }
+        .option:hover { border-color:#667eea; background:#f0f4ff; }
+        .option.selected { background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:white; border-color:transparent; }
+        .quiz-footer { display:flex; justify-content:space-between; align-items:center; margin-top:30px; padding-top:20px; border-top:2px solid #e0e0e0; }
+        .progress-bar { flex:1; height:10px; background:#e0e0e0; border-radius:5px; margin:0 20px; overflow:hidden; }
+        .progress-fill { height:100%; background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); width:0%; transition:width 0.3s; }
+        .violation-log { margin-top:30px; padding:20px; background:#fff3f3; border-radius:10px; border-left:4px solid #ff4757; display:none; }
+        .violation-item { padding:8px; margin:5px 0; background:white; border-radius:5px; border-left:3px solid #ff4757; font-size:14px; }
+        .result-modal { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:10000; justify-content:center; align-items:center; }
+        .result-content { background:white; padding:40px; border-radius:20px; max-width:500px; text-align:center; max-height:80vh; overflow-y:auto; }
+        .result-score { font-size:48px; font-weight:bold; margin:20px 0; color:#667eea; }
+        .result-trust { font-size:24px; margin:20px 0; padding:15px; background:#f8f9fa; border-radius:10px; }
+        .violation-summary { max-height:150px; overflow-y:auto; padding:10px; background:#f8f9fa; border-radius:5px; text-align:left; margin:15px 0; font-size:12px; }
+        .fullscreen-warning { position:fixed; top:0; left:0; right:0; background:#ff4757; color:white; text-align:center; padding:15px; font-weight:bold; z-index:9999; display:none; }
+        .trust-score-low { color:#ff4757; } .trust-score-medium { color:#ffa502; } .trust-score-high { color:#28a745; }
+    </style>
+</head>
+<body>
+    <!-- Same HTML structure – no changes needed -->
+    <div class="fullscreen-warning" id="fullscreenWarning">⚠️ Please stay in fullscreen mode during the exam!</div>
+
+    <div class="result-modal" id="resultModal">
+        <div class="result-content">
+            <h2>🎉 Quiz Completed!</h2>
+            <div class="result-score" id="resultScore">0/10</div>
+            <div class="result-trust" id="resultTrust">Trust Score: 100%</div>
+            <p id="resultMessage"></p>
+            <div class="violation-summary" id="violationSummary"></div>
+            <button class="btn" onclick="closeResultModal()">Take Another Quiz</button>
+            <button class="btn" style="background:#6c757d;" onclick="window.location.reload()">Start Over</button>
+        </div>
+    </div>
+
+    <div class="exam-container">
+        <div class="warning-bar" id="warningBar">⚠️ Integrity Violation Detected!</div>
+        <div class="exam-header">
+            <div class="exam-title">📝 Tech Quiz</div>
+            <div class="trust-score" id="trustScoreDisplay">Trust Score: 100%</div>
+        </div>
+        <div class="exam-content">
+            <div id="joinSection" class="join-section">
+                <h2>Join Secure Exam</h2>
+                <div class="input-group"><label>Your Name</label><input type="text" id="studentName" placeholder="Enter your full name"></div>
+                <div class="input-group"><label>Exam Code</label><input type="text" id="examCode" placeholder="Enter exam code"></div>
+                <button class="btn" onclick="joinExam()">Start Quiz</button>
+                <p style="margin-top:20px; color:#666; font-size:14px;">⚠️ 10 Questions • 5 Minutes • Integrity Monitored</p>
+            </div>
+            <div id="examSection" class="question-section">
+                <div class="warning-message" id="integrityMessage">🔒 Integrity monitoring active</div>
+                <div class="quiz-header">
+                    <div class="question-counter" id="questionCounter">Question 1 of 10</div>
+                    <div class="timer" id="timer">05:00</div>
+                </div>
+                <div id="questions"></div>
+                <div class="quiz-footer">
+                    <button class="btn" id="prevBtn" onclick="previousQuestion()" style="background:#6c757d;">← Previous</button>
+                    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+                    <button class="btn" id="nextBtn" onclick="nextQuestion()">Next →</button>
+                </div>
+                <div style="text-align:center; margin-top:20px;">
+                    <button class="btn" onclick="submitExam()" style="background:#28a745;" id="submitBtn">Submit Quiz</button>
+                </div>
+                <div class="violation-log" id="violationLog">
+                    <h3>⚠️ Integrity Violations</h3>
+                    <div id="violationList"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== CONFIG ====================
+        const SAMPLE_QUESTIONS = [
+            { text:'What does CPU stand for?', options:['Central Processing Unit','Computer Personal Unit','Central Program Utility','Core Processing Unit'], correct:0 },
+            { text:'Which language is known as the "language of the web"?', options:['Python','Java','JavaScript','C++'], correct:2 },
+            { text:'What does RAM stand for?', options:['Random Access Memory','Read Access Memory','Rapid Access Module','Random Allocation Memory'], correct:0 },
+            { text:'Which company developed Windows?', options:['Apple','Microsoft','Google','IBM'], correct:1 },
+            { text:'Main function of an OS?', options:['Create documents','Manage hardware/software','Browse internet','Play games'], correct:1 },
+            { text:'Which is a version control system?', options:['Git','Docker','Kubernetes','Jenkins'], correct:0 },
+            { text:'What does HTML stand for?', options:['Hyper Text Markup Language','High Tech Modern Language','Hyper Transfer Markup Language','Home Tool Markup Language'], correct:0 },
+            { text:'Which is a NoSQL database?', options:['MySQL','PostgreSQL','MongoDB','SQLite'], correct:2 },
+            { text:'Most popular programming language 2024?', options:['Python','Java','JavaScript','C#'], correct:2 },
+            { text:'Secure web protocol?', options:['HTTP','FTP','HTTPS','SMTP'], correct:2 }
+        ];
+
+        // ==================== GLOBAL STATE ====================
+        let socket;
+        let studentName = '', examCode = '';
+        let trustScore = 100;
+        let violationCount = 0;
+        let currentQuestion = 0;
+        let answers = new Array(10).fill(null);
+        let timerInterval;
+        let timeLeft = 300; // 5 minutes
+
+        // Flags for monitoring
+        let monitoringActive = false;
+        let disableResizeMonitoring = false;
+        let isInitialFullscreen = false;
+        let examActive = false; // ← controls whether violations are recorded
+
+        // Tab-switch duration
+        let blurStartTime = null;
+
+        // Idle detection
+        let idleTimer = null;
+        let idleThreshold = 60; // seconds
+        let lastActivityTime = Date.now();
+
+        // ==================== SOCKET ====================
+        function initSocket() {
+            if (socket && socket.connected) return;
+            socket = io('http://localhost:3000');
+            socket.on('connect', () => console.log('Connected to server'));
+            socket.on('disconnect', () => console.log('Disconnected from server'));
+        }
+
+        // ==================== JOIN EXAM ====================
+        function joinExam() {
+            studentName = document.getElementById('studentName').value.trim();
+            examCode = document.getElementById('examCode').value.trim();
+            if (!studentName || !examCode) return alert('Enter name and exam code');
+
+            if (!socket || !socket.connected) {
+                initSocket();
+            }
+
+            disableResizeMonitoring = true;
+            isInitialFullscreen = true;
+            examActive = true;
+
+            socket.emit('join-exam', { studentName, examCode });
+
+            document.getElementById('joinSection').style.display = 'none';
+            document.getElementById('examSection').style.display = 'block';
+
+            // Reset quiz state
+            trustScore = 100;
+            violationCount = 0;
+            answers.fill(null);
+            currentQuestion = 0;
+            timeLeft = 300;
+            blurStartTime = null;
+            lastActivityTime = Date.now();
+
+            document.getElementById('violationLog').style.display = 'none';
+            document.getElementById('violationList').innerHTML = '';
+            document.getElementById('trustScoreDisplay').textContent = 'Trust Score: 100%';
+            document.getElementById('trustScoreDisplay').style.color = 'white';
+            document.getElementById('timer').textContent = '05:00';
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('prevBtn').disabled = true;
+            document.getElementById('nextBtn').disabled = false;
+            document.getElementById('submitBtn').disabled = false;
+
+            loadQuestion();
+            startTimer();
+            requestFullscreen();
+
+            if (!monitoringActive) {
+                setupMonitoring();
+                monitoringActive = true;
+            }
+
+            setTimeout(() => {
+                disableResizeMonitoring = false;
+                isInitialFullscreen = false;
+            }, 2000);
+        }
+
+        // ==================== QUESTION FUNCTIONS ====================
+        function loadQuestion() {
+            const q = SAMPLE_QUESTIONS[currentQuestion];
+            const html = `
+                <div class="question">
+                    <h3>${currentQuestion+1}. ${q.text}</h3>
+                    <div class="options">
+                        ${q.options.map((opt, i) => `
+                            <div class="option ${answers[currentQuestion] === i ? 'selected' : ''}" onclick="selectOption(${currentQuestion}, ${i})">
+                                ${String.fromCharCode(65+i)}. ${opt}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+            document.getElementById('questions').innerHTML = html;
+            document.getElementById('questionCounter').textContent = `Question ${currentQuestion+1} of 10`;
+        }
+
+        function selectOption(qIdx, optIdx) {
+            answers[qIdx] = optIdx;
+            const answered = answers.filter(a => a !== null).length;
+            document.getElementById('progressFill').style.width = `${(answered/10)*100}%`;
+            loadQuestion();
+            if (qIdx < 9) setTimeout(() => nextQuestion(), 500);
+        }
+
+        function nextQuestion() { if (currentQuestion < 9) { currentQuestion++; loadQuestion(); } }
+        function previousQuestion() { if (currentQuestion > 0) { currentQuestion--; loadQuestion(); } }
+
+        // ==================== TIMER ====================
+        function startTimer() {
+            clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                if (timeLeft <= 0) {
+                    clearInterval(timerInterval);
+                    submitExam(true);
+                }
+                const m = Math.floor(timeLeft/60);
+                const s = timeLeft%60;
+                document.getElementById('timer').textContent = `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+                if (timeLeft === 60) alert('⚠️ 1 minute remaining!');
+            }, 1000);
+        }
+
+        // ==================== MONITORING SETUP ====================
+        function setupMonitoring() {
+            // Tab switch duration
+            document.addEventListener('visibilitychange', () => {
+                if (!examActive) return;
+                if (document.hidden) {
+                    blurStartTime = Date.now();
+                } else {
+                    if (blurStartTime) {
+                        const durationSec = Math.round((Date.now() - blurStartTime) / 1000);
+                        if (durationSec > 0) {
+                            recordViolation('tab_switch', `Switched away for ${durationSec} seconds`, durationSec);
+                        }
+                        blurStartTime = null;
+                    }
+                }
+            });
+
+            window.addEventListener('blur', () => {
+                if (!examActive) return;
+                if (!document.hidden) blurStartTime = Date.now();
+            });
+            window.addEventListener('focus', () => {
+                if (!examActive) return;
+                if (blurStartTime) {
+                    const durationSec = Math.round((Date.now() - blurStartTime) / 1000);
+                    if (durationSec > 0) {
+                        recordViolation('tab_switch', `Switched away for ${durationSec} seconds`, durationSec);
+                    }
+                    blurStartTime = null;
+                }
+            });
+
+            // Window size <80% of screen
+            let lastCheck = 0;
+            window.addEventListener('resize', () => {
+                if (!examActive) return;
+                if (disableResizeMonitoring) return;
+                const now = Date.now();
+                if (now - lastCheck < 500) return;
+                lastCheck = now;
+                const winArea = window.innerWidth * window.innerHeight;
+                const screenArea = window.screen.width * window.screen.height;
+                const ratio = winArea / screenArea;
+                if (ratio < 0.8) {
+                    recordViolation('window_resize', `Window size reduced to ${Math.round(ratio*100)}% of screen`);
+                }
+            });
+
+            // Keyboard hijacking
+            document.addEventListener('keydown', (e) => {
+                if (!examActive) return;
+                if (e.ctrlKey && (e.key === 'c' || e.key === 'C')) {
+                    e.preventDefault();
+                    recordViolation('keyboard_shortcut', 'Ctrl+C attempted');
+                }
+                if (e.ctrlKey && (e.key === 'v' || e.key === 'V')) {
+                    e.preventDefault();
+                    recordViolation('keyboard_shortcut', 'Ctrl+V attempted');
+                }
+                if (e.key === 'F12') {
+                    e.preventDefault();
+                    recordViolation('keyboard_shortcut', 'F12 (DevTools) attempted');
+                }
+                if (e.key === 'PrintScreen') {
+                    e.preventDefault();
+                    recordViolation('keyboard_shortcut', 'Print Screen attempted');
+                }
+                if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J' || e.key === 'C')) {
+                    e.preventDefault();
+                    recordViolation('keyboard_shortcut', 'DevTools shortcut attempted');
+                }
+                if (e.ctrlKey && e.key === 'u') {
+                    e.preventDefault();
+                    recordViolation('keyboard_shortcut', 'View source attempted');
+                }
+            });
+
+            // Idle detection
+            function resetIdleTimer() {
+                lastActivityTime = Date.now();
+                if (idleTimer) clearTimeout(idleTimer);
+                idleTimer = setTimeout(() => {
+                    if (!examActive) return;
+                    const idleSeconds = Math.round((Date.now() - lastActivityTime) / 1000);
+                    if (idleSeconds >= idleThreshold) {
+                        recordViolation('idle', `No activity for ${idleSeconds} seconds`, idleSeconds);
+                    }
+                }, idleThreshold * 1000);
+            }
+            ['mousemove', 'keydown', 'mousedown', 'touchstart'].forEach(ev => {
+                window.addEventListener(ev, resetIdleTimer);
+            });
+            resetIdleTimer();
+
+            // Right-click
+            document.addEventListener('contextmenu', (e) => {
+                if (!examActive) return;
+                e.preventDefault();
+                recordViolation('right_click', 'Right-click attempted');
+            });
+
+            // Fullscreen exit
+            document.addEventListener('fullscreenchange', () => {
+                if (!examActive) return;
+                if (!document.fullscreenElement && !isInitialFullscreen) {
+                    recordViolation('fullscreen_exit', 'Exited fullscreen mode');
+                    document.getElementById('fullscreenWarning').style.display = 'block';
+                    setTimeout(() => document.getElementById('fullscreenWarning').style.display = 'none', 3000);
+                    requestFullscreen();
+                }
+            });
+
+            // DevTools detection (optional)
+            let devToolsOpen = false;
+            setInterval(() => {
+                if (!examActive) return;
+                const widthThreshold = window.outerWidth - window.innerWidth > 200;
+                const heightThreshold = window.outerHeight - window.innerHeight > 200;
+                if (widthThreshold || heightThreshold) {
+                    if (!devToolsOpen) {
+                        devToolsOpen = true;
+                        recordViolation('devtools', 'Developer tools detected');
+                    }
+                } else {
+                    devToolsOpen = false;
+                }
+            }, 1000);
+        }
+
+        // ==================== RECORD VIOLATION ====================
+        function recordViolation(type, details, duration = null) {
+            if (!examActive) {
+                console.log('Violation ignored because exam not active:', type, details);
+                return;
+            }
+
+            const weights = {
+                'tab_switch': 15,
+                'window_resize': 10,
+                'keyboard_shortcut': 10,
+                'idle': 5,
+                'right_click': 5,
+                'fullscreen_exit': 15,
+                'devtools': 25,
+                'copy_attempt': 20,
+                'window_blur': 5
+            };
+            const deduction = weights[type] || 10;
+            trustScore = Math.max(0, trustScore - deduction);
+            violationCount++;
+
+            console.log(`Recorded violation #${violationCount}: ${type} (${deduction}%), trust now ${trustScore}`);
+
+            document.getElementById('warningBar').style.display = 'block';
+            setTimeout(() => document.getElementById('warningBar').style.display = 'none', 3000);
+
+            const trustDisplay = document.getElementById('trustScoreDisplay');
+            trustDisplay.textContent = `Trust Score: ${trustScore}%`;
+            if (trustScore < 50) trustDisplay.style.color = '#ff4757';
+            else if (trustScore < 80) trustDisplay.style.color = '#ffa502';
+            else trustDisplay.style.color = 'white';
+
+            const log = document.getElementById('violationList');
+            const item = document.createElement('div');
+            item.className = 'violation-item';
+            let displayDetails = details;
+            if (duration) displayDetails += ` (duration: ${duration}s)`;
+            item.textContent = `${new Date().toLocaleTimeString()}: ${displayDetails} (-${deduction}%)`;
+            log.prepend(item);
+            document.getElementById('violationLog').style.display = 'block';
+            if (log.children.length > 15) log.removeChild(log.lastChild);
+
+            if (socket && socket.connected) {
+                socket.emit('violation', {
+                    type,
+                    details: displayDetails,
+                    duration,
+                    examCode,
+                    trustScore
+                });
+                console.log('Emitted violation to server:', type);
+            } else {
+                console.log('Socket not connected, violation not sent');
+            }
+        }
+
+        // ==================== FULLSCREEN CONTROL ====================
+        function requestFullscreen() {
+            const el = document.documentElement;
+            if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+            else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+            else if (el.msRequestFullscreen) el.msRequestFullscreen();
+        }
+
+        function exitFullscreen() {
+            if (document.exitFullscreen) {
+                document.exitFullscreen().catch(() => {});
+            } else if (document.webkitExitFullscreen) {
+                document.webkitExitFullscreen();
+            } else if (document.msExitFullscreen) {
+                document.msExitFullscreen();
+            }
+        }
+
+        // ==================== SUBMIT EXAM ====================
+        function submitExam() {
+            clearInterval(timerInterval);
+            
+            examActive = false; // stop monitoring
+            
+            disableResizeMonitoring = true;
+            exitFullscreen();
+            setTimeout(() => { disableResizeMonitoring = false; }, 1000);
+
+            let correct = 0;
+            answers.forEach((a, i) => { if (a === SAMPLE_QUESTIONS[i].correct) correct++; });
+
+            const violationItems = Array.from(document.getElementById('violationList').children).map(el => el.textContent);
+
+            if (socket && socket.connected) {
+                socket.emit('exam-completed', {
+                    studentId: socket.id,
+                    studentName,
+                    examCode,
+                    score: correct,
+                    totalQuestions: 10,
+                    trustScore,
+                    violations: violationCount,
+                    violationDetails: violationItems
+                });
+                console.log('Submitted exam with', violationCount, 'violations');
+            }
+
+            document.getElementById('resultScore').textContent = `${correct}/10`;
+            let trustColor = trustScore>=80 ? 'trust-score-high' : trustScore>=50 ? 'trust-score-medium' : 'trust-score-low';
+            document.getElementById('resultTrust').innerHTML = `Trust Score: <span class="${trustColor}">${trustScore}%</span>`;
+            let msg = correct>=8 ? '🏆 Excellent!' : correct>=5 ? '👍 Good job!' : '📚 Keep studying!';
+            if (violationCount) msg += ` ⚠️ ${violationCount} violation(s) recorded.`;
+            document.getElementById('resultMessage').textContent = msg;
+
+            const summaryDiv = document.getElementById('violationSummary');
+            if (violationItems.length) {
+                summaryDiv.innerHTML = '<strong>Violation History:</strong><br>' + violationItems.map(v => `<div>${v}</div>`).join('');
+            } else {
+                summaryDiv.innerHTML = '<div>✅ No violations</div>';
+            }
+
+            document.getElementById('resultModal').style.display = 'flex';
+            document.querySelectorAll('.option').forEach(opt => { opt.style.pointerEvents = 'none'; opt.style.opacity = '0.7'; });
+            document.getElementById('prevBtn').disabled = true;
+            document.getElementById('nextBtn').disabled = true;
+            document.getElementById('submitBtn').disabled = true;
+        }
+
+        // ==================== CLOSE MODAL & LEAVE EXAM ====================
+        function closeResultModal() {
+            examActive = false;
+
+            document.getElementById('resultModal').style.display = 'none';
+            document.getElementById('examSection').style.display = 'none';
+            document.getElementById('joinSection').style.display = 'block';
+
+            // Reset quiz state
+            trustScore = 100;
+            violationCount = 0;
+            answers.fill(null);
+            currentQuestion = 0;
+            timeLeft = 300;
+            blurStartTime = null;
+            lastActivityTime = Date.now();
+
+            document.getElementById('violationLog').style.display = 'none';
+            document.getElementById('violationList').innerHTML = '';
+            document.getElementById('trustScoreDisplay').textContent = 'Trust Score: 100%';
+            document.getElementById('trustScoreDisplay').style.color = 'white';
+            document.getElementById('timer').textContent = '05:00';
+            document.getElementById('progressFill').style.width = '0%';
+
+            document.querySelectorAll('.option').forEach(opt => {
+                opt.style.pointerEvents = 'auto';
+                opt.style.opacity = '1';
+            });
+            document.getElementById('prevBtn').disabled = false;
+            document.getElementById('nextBtn').disabled = false;
+            document.getElementById('submitBtn').disabled = false;
+            document.getElementById('questions').innerHTML = '';
+
+            if (socket && socket.connected && examCode) {
+                socket.emit('leave-exam', { examCode });
+                console.log('Left exam', examCode);
+            }
+        }
+
+        // ==================== INIT ====================
+        window.onload = () => { initSocket(); };
+        window.addEventListener('popstate', () => window.history.pushState(null, null, window.location.href));
+        window.addEventListener('beforeunload', (e) => {
+            if (document.getElementById('examSection').style.display === 'block') {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        });
+    </script>
+</body>
+</html>
